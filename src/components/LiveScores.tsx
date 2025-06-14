@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { AlphaArcadeService } from '../services/alphaArcadeService';
-import { SportsScoreService } from '../services/sportsScoreService';
+import { LiveScoresService } from '../services/liveScoresService';
 import './LiveScores.css';
 
-interface GameScore {
-  id: string;
+interface LiveGame {
   homeTeam: string;
   awayTeam: string;
   homeScore: number;
@@ -13,62 +11,19 @@ interface GameScore {
   period: number;
   timeRemaining: string;
   sport: string;
-}
-
-interface Market {
-  id: string;
-  title: string;
-  categories: string[];
-  endTs: number;
-  label?: string;
-  marketAppId: number;
-  yesProb: number;
-  noProb: number;
-  marketVolume: number;
-  secondaryTitle?: string;
+  inningState?: string; // For baseball games: "Top" or "Bottom"
 }
 
 export const LiveScores: React.FC = () => {
-  const [scores, setScores] = useState<GameScore[]>([]);
-  const [markets, setMarkets] = useState<Market[]>([]);
+  const [games, setGames] = useState<LiveGame[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const alphaArcadeService = AlphaArcadeService.getInstance();
-        const sportsScoreService = SportsScoreService.getInstance();
-
-        // Fetch both markets and scores
-        const [liveMarkets, liveScores] = await Promise.all([
-          alphaArcadeService.getLiveMarkets(),
-          sportsScoreService.getAllLiveScores()
-        ]);
-
-        // Get active sports markets
-        const activeMarkets = alphaArcadeService.getActiveSportsMarkets();
-        setMarkets(activeMarkets);
-
-        // Filter scores to only include games that have active markets
-        const filteredScores = liveScores.filter(score => {
-          return activeMarkets.some(market => {
-            const teams = alphaArcadeService.getTeamsFromMarket(market);
-            if (!teams) return false;
-
-            // Check if either team in the market matches either team in the score
-            const homeTeamMatch = 
-              teams.homeTeam.toLowerCase() === score.homeTeam.toLowerCase() ||
-              teams.homeTeam.toLowerCase() === score.awayTeam.toLowerCase();
-            
-            const awayTeamMatch = 
-              teams.awayTeam.toLowerCase() === score.homeTeam.toLowerCase() ||
-              teams.awayTeam.toLowerCase() === score.awayTeam.toLowerCase();
-
-            return homeTeamMatch || awayTeamMatch;
-          });
-        });
-
-        setScores(filteredScores);
+        const liveScoresService = LiveScoresService.getInstance();
+        const liveGames = await liveScoresService.getLiveGames();
+        setGames(liveGames);
         setError(null);
       } catch (err) {
         setError('Failed to fetch live scores');
@@ -90,42 +45,80 @@ export const LiveScores: React.FC = () => {
     return <div className="error">{error}</div>;
   }
 
-  if (scores.length === 0) {
-    return <div className="no-games">No active games at the moment</div>;
-  }
+  const liveGames = games.filter(game => game.status === 'STATUS_IN_PROGRESS');
+  const upcomingGames = games.filter(game => 
+    game.status !== 'STATUS_IN_PROGRESS' && 
+    game.status !== 'STATUS_FINAL' && 
+    game.status !== 'STATUS_POSTPONED'
+  );
+
+  const renderGameCard = (game: LiveGame, isLive: boolean) => (
+    <div key={`${game.homeTeam}-${game.awayTeam}`} className="score-card">
+      <div className="game-header">
+        <span className="sport">{game.sport}</span>
+        {game.status === 'STATUS_DELAYED' && (
+          <span className="delayed-badge">Delayed</span>
+        )}
+      </div>
+      <div className="teams">
+        <div className="team home">
+          <span className="team-name">{game.homeTeam}</span>
+          <span className="score">{game.homeScore}</span>
+        </div>
+        <div className="team away">
+          <span className="team-name">{game.awayTeam}</span>
+          <span className="score">{game.awayScore}</span>
+        </div>
+      </div>
+      {isLive && (
+        <div className="game-info">
+          <span className="period">
+            {game.sport === 'MLB' ? (
+              <>
+                {`Inning ${game.period}`}
+                {game.inningState && (
+                  <span className="inning-arrow">
+                    {game.inningState === 'Top' ? '↑' : '↓'}
+                  </span>
+                )}
+              </>
+            ) : game.sport === 'NBA' ? `Q${game.period}` :
+               game.sport === 'NFL' ? `Q${game.period}` :
+               `Period ${game.period}`}
+          </span>
+          {(game.sport === 'NBA' || game.sport === 'NFL' || game.sport === 'NHL') && (
+            <span className="time">{game.timeRemaining}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="live-scores">
-      <h2>Live Sports Scores</h2>
-      <div className="scores-grid">
-        {scores.map((score) => (
-          <div key={score.id} className="score-card">
-            <div className="game-header">
-              <span className="sport">{score.sport}</span>
-              <span className="status">{score.status}</span>
-            </div>
-            <div className="teams">
-              <div className="team home">
-                <span className="team-name">{score.homeTeam}</span>
-                <span className="score">{score.homeScore}</span>
-              </div>
-              <div className="team away">
-                <span className="team-name">{score.awayTeam}</span>
-                <span className="score">{score.awayScore}</span>
-              </div>
-            </div>
-            <div className="game-info">
-              <span className="period">
-                {score.sport === 'MLB' ? `Inning ${score.period}` :
-                 score.sport === 'NBA' ? `Q${score.period}` :
-                 score.sport === 'NFL' ? `Q${score.period}` :
-                 `Period ${score.period}`}
-              </span>
-              <span className="time">{score.timeRemaining}</span>
-            </div>
+      <h2>Sports Scores</h2>
+      
+      {liveGames.length > 0 && (
+        <div className="section">
+          <h3>Live Games</h3>
+          <div className="scores-grid">
+            {liveGames.map(game => renderGameCard(game, true))}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {upcomingGames.length > 0 && (
+        <div className="section">
+          <h3>Upcoming Games</h3>
+          <div className="scores-grid">
+            {upcomingGames.map(game => renderGameCard(game, false))}
+          </div>
+        </div>
+      )}
+
+      {liveGames.length === 0 && upcomingGames.length === 0 && (
+        <div className="no-games">No games scheduled at the moment</div>
+      )}
     </div>
   );
 }; 
